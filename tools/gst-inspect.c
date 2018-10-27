@@ -2,6 +2,7 @@
  * Copyright (C) 1999,2000 Erik Walthinsen <omega@cse.ogi.edu>
  *               2000 Wim Taymans <wtay@chello.be>
  *               2004 Thomas Vander Stichele <thomas@apestaart.org>
+ *               2018 Collabora Ltd.
  *
  * gst-inspect.c: tool to inspect the GStreamer registry
  *
@@ -29,7 +30,7 @@
  * with newer GLib versions (>= 2.31.0) */
 #define GLIB_DISABLE_DEPRECATION_WARNINGS
 
-#define DEFAULT_PAGER "less"
+#define DEFAULT_PAGER "less -R"
 
 #include "tools.h"
 #include <gst/gst_private.h>    /* for internal Factories */
@@ -41,6 +42,41 @@
 #   include <unistd.h>
 #   include <sys/wait.h>
 #endif
+
+gboolean colored_output = TRUE;
+
+/* Consol colors */
+
+/* General colors */
+#define HEADING_COLOR (colored_output? "\033[38;2;200;0;0m" : "")
+#define PROP_NAME_COLOR   (colored_output? "\033[38;2;200;0;0m" : "")
+#define PROP_VALUE_COLOR  (colored_output? "\033[38;2;135;175;0m" : "")
+#define PROP_ATTR_NAME_COLOR   (colored_output? "\033[38;2;0;0;255m" : "")
+#define PROP_ATTR_VALUE_COLOR  (colored_output? "\033[38;2;255;255;0m" : "")
+#define DESC_COLOR        (colored_output? "\033[38;2;135;175;0m" : "")
+#define RESET_COLOR       (colored_output? "\033[0m": "")
+
+/* Datatype-related colors */
+#define DATATYPE_COLOR (colored_output? "\033[38;2;200;0;0m" : "")
+#define CHILD_LINK_COLOR (colored_output? "\033[38;2;200;0;0m" : "")
+
+/* Caps colors */
+#define FIELD_NAME_COLOR   (colored_output? "\033[38;2;200;0;0m" : "")
+#define FIELD_VALUE_COLOR  (colored_output? "\033[38;2;135;175;0m" : "")
+#define CAPS_TYPE_COLOR   (colored_output? "\033[38;2;155;155;0m" : "")
+#define STRUCT_NAME_COLOR CAPS_TYPE_COLOR
+#define FEATURE_COLOR     (colored_output? "\033[38;2;0;155;0m" : "")
+
+/* Plugin listing colors */
+#define PLUGIN_NAME_COLOR    (colored_output? "\033[38;2;200;200;0m" : "")
+#define ELEMENT_NAME_COLOR   (colored_output? "\033[38;2;200;0;200m" : "")
+#define ELEMENT_DETAIL_COLOR (colored_output? "\033[38;2;135;175;200m" : "")
+
+/* Feature listing colors */
+#define FEATURE_NAME_COLOR  (colored_output? "\033[38;2;200;200;0m" : "")
+#define FEATURE_DIR_COLOR   (colored_output? "\033[38;2;200;0;200m" : "")
+#define FEATURE_RANK_COLOR  (colored_output? "\033[38;2;135;175;200m" : "")
+#define FEATURE_PROTO_COLOR (colored_output? "\033[38;2;50;200;200m" : "")
 
 static char *_name = NULL;
 static int indent = 0;
@@ -88,7 +124,9 @@ print_field (GQuark field, const GValue * value, gpointer pfx)
 {
   gchar *str = gst_value_serialize (value);
 
-  n_print ("%s  %15s: %s\n", (gchar *) pfx, g_quark_to_string (field), str);
+  n_print ("%s  %s%15s%s: %s%s%s\n",
+      (gchar *) pfx, FIELD_NAME_COLOR, g_quark_to_string (field), RESET_COLOR,
+      FIELD_VALUE_COLOR, str, RESET_COLOR);
   g_free (str);
   return TRUE;
 }
@@ -101,11 +139,11 @@ print_caps (const GstCaps * caps, const gchar * pfx)
   g_return_if_fail (caps != NULL);
 
   if (gst_caps_is_any (caps)) {
-    n_print ("%sANY\n", pfx);
+    n_print ("%s%sANY%s\n", CAPS_TYPE_COLOR, pfx, RESET_COLOR);
     return;
   }
   if (gst_caps_is_empty (caps)) {
-    n_print ("%sEMPTY\n", pfx);
+    n_print ("%s%sEMPTY%s\n", CAPS_TYPE_COLOR, pfx, RESET_COLOR);
     return;
   }
 
@@ -118,11 +156,13 @@ print_caps (const GstCaps * caps, const gchar * pfx)
                 GST_CAPS_FEATURES_MEMORY_SYSTEM_MEMORY))) {
       gchar *features_string = gst_caps_features_to_string (features);
 
-      n_print ("%s%s(%s)\n", pfx, gst_structure_get_name (structure),
-          features_string);
+      n_print ("%s%s%s%s(%s%s%s)\n", pfx, STRUCT_NAME_COLOR,
+          gst_structure_get_name (structure), RESET_COLOR,
+          FEATURE_COLOR, features_string, RESET_COLOR);
       g_free (features_string);
     } else {
-      n_print ("%s%s\n", pfx, gst_structure_get_name (structure));
+      n_print ("%s%s%s%s\n", pfx, STRUCT_NAME_COLOR,
+          gst_structure_get_name (structure), RESET_COLOR);
     }
     gst_structure_foreach (structure, print_field, (gpointer) pfx);
   }
@@ -163,10 +203,11 @@ print_factory_details_info (GstElementFactory * factory)
   char s[20];
 
   rank = gst_plugin_feature_get_rank (GST_PLUGIN_FEATURE (factory));
-  n_print ("Factory Details:\n");
+  n_print ("%sFactory Details:%s\n", HEADING_COLOR, RESET_COLOR);
 
   push_indent ();
-  n_print ("%-25s%s (%d)\n", "Rank", get_rank_name (s, rank), rank);
+  n_print ("%s%-25s%s%s (%d)%s\n", PROP_NAME_COLOR, "Rank", PROP_VALUE_COLOR,
+      get_rank_name (s, rank), rank, RESET_COLOR);
 
   keys = gst_element_factory_get_metadata_keys (factory);
   if (keys != NULL) {
@@ -176,7 +217,8 @@ print_factory_details_info (GstElementFactory * factory)
 
       val = gst_element_factory_get_metadata (factory, key);
       key[0] = g_ascii_toupper (key[0]);
-      n_print ("%-25s%s\n", key, val);
+      n_print ("%s%-25s%s%s%s\n", PROP_NAME_COLOR, key, PROP_VALUE_COLOR, val,
+          RESET_COLOR);
     }
     g_strfreev (keys);
   }
@@ -199,14 +241,14 @@ print_hierarchy (GType type, gint level, gint * maxlevel)
     print_hierarchy (parent, level, maxlevel);
 
   if (_name)
-    g_print ("%s", _name);
+    g_print ("%s%s%s", DATATYPE_COLOR, _name, RESET_COLOR);
 
   for (i = 1; i < *maxlevel - level; i++)
     g_print ("      ");
   if (*maxlevel - level)
-    g_print (" +----");
+    g_print (" %s+----%s", CHILD_LINK_COLOR, RESET_COLOR);
 
-  g_print ("%s\n", g_type_name (type));
+  g_print ("%s%s%s\n", DATATYPE_COLOR, g_type_name (type), RESET_COLOR);
 
   if (level == 1)
     n_print ("\n");
@@ -220,11 +262,11 @@ print_interfaces (GType type)
 
   if (ifaces) {
     if (n_ifaces) {
-      n_print (_("Implemented Interfaces:\n"));
+      n_print (_("%sImplemented Interfaces%s:\n"), HEADING_COLOR, RESET_COLOR);
       push_indent ();
       iface = ifaces;
       while (*iface) {
-        n_print ("%s\n", g_type_name (*iface));
+        n_print ("%s%s%s\n", DATATYPE_COLOR, g_type_name (*iface), RESET_COLOR);
         iface++;
       }
       pop_indent ();
@@ -295,7 +337,7 @@ print_object_properties_info (GObject * obj, GObjectClass * obj_class,
   g_qsort_with_data (property_specs, num_properties, sizeof (gpointer),
       (GCompareDataFunc) sort_gparamspecs, NULL);
 
-  n_print ("%s:\n", desc);
+  n_print ("%s%s%s:\n", HEADING_COLOR, desc, RESET_COLOR);
 
   push_indent ();
 
@@ -313,13 +355,14 @@ print_object_properties_info (GObject * obj, GObjectClass * obj_class,
 
     g_value_init (&value, param->value_type);
 
-    n_print ("%-20s: %s\n", g_param_spec_get_name (param),
-        g_param_spec_get_blurb (param));
+    n_print ("%s%-20s%s: %s%s%s\n", PROP_NAME_COLOR,
+        g_param_spec_get_name (param), RESET_COLOR, PROP_VALUE_COLOR,
+        g_param_spec_get_blurb (param), RESET_COLOR);
 
     push_indent_n (11);
 
     first_flag = TRUE;
-    n_print ("flags: ");
+    n_print ("%sflags%s: ", PROP_ATTR_NAME_COLOR, RESET_COLOR);
     readable = ! !(param->flags & G_PARAM_READABLE);
     if (readable && obj != NULL) {
       g_object_get_property (obj, param->name, &value);
@@ -330,31 +373,37 @@ print_object_properties_info (GObject * obj, GObjectClass * obj_class,
       g_param_value_set_default (param, &value);
     }
     if (readable) {
-      g_print ("%s%s", (first_flag) ? "" : ", ", _("readable"));
+      g_print ("%s%s%s%s", (first_flag) ? "" : ", ", PROP_ATTR_VALUE_COLOR,
+          _("readable"), RESET_COLOR);
       first_flag = FALSE;
     }
     if (param->flags & G_PARAM_WRITABLE) {
-      g_print ("%s%s", (first_flag) ? "" : ", ", _("writable"));
+      g_print ("%s%s%s%s", (first_flag) ? "" : ", ", PROP_ATTR_VALUE_COLOR,
+          _("writable"), RESET_COLOR);
       first_flag = FALSE;
     }
     if (param->flags & G_PARAM_DEPRECATED) {
-      g_print ("%s%s", (first_flag) ? "" : ", ", _("deprecated"));
+      g_print ("%s%s%s%s", (first_flag) ? "" : ", ", PROP_ATTR_VALUE_COLOR,
+          _("deprecated"), RESET_COLOR);
       first_flag = FALSE;
     }
     if (param->flags & GST_PARAM_CONTROLLABLE) {
-      g_print (", %s", _("controllable"));
+      g_print (", %s%s%s", PROP_ATTR_VALUE_COLOR, _("controllable"), RESET_COLOR);
       first_flag = FALSE;
     }
     if (param->flags & GST_PARAM_MUTABLE_PLAYING) {
-      g_print (", %s", _("changeable in NULL, READY, PAUSED or PLAYING state"));
+      g_print (", %s%s%s", PROP_ATTR_VALUE_COLOR,
+          _("changeable in NULL, READY, PAUSED or PLAYING state"), RESET_COLOR);
     } else if (param->flags & GST_PARAM_MUTABLE_PAUSED) {
-      g_print (", %s", _("changeable only in NULL, READY or PAUSED state"));
+      g_print (", %s%s%s", PROP_ATTR_VALUE_COLOR,
+          _("changeable only in NULL, READY or PAUSED state"), RESET_COLOR);
     } else if (param->flags & GST_PARAM_MUTABLE_READY) {
-      g_print (", %s", _("changeable only in NULL or READY state"));
+      g_print (", %s%s%s", PROP_ATTR_VALUE_COLOR,
+          _("changeable only in NULL or READY state"), RESET_COLOR);
     }
     if (param->flags & ~KNOWN_PARAM_FLAGS) {
-      g_print ("%s0x%0x", (first_flag) ? "" : ", ",
-          param->flags & ~KNOWN_PARAM_FLAGS);
+      g_print ("%s0x%s%0x%s", (first_flag) ? "" : ", ", PROP_ATTR_VALUE_COLOR,
+          param->flags & ~KNOWN_PARAM_FLAGS, RESET_COLOR);
     }
     g_print ("\n");
 
@@ -363,27 +412,35 @@ print_object_properties_info (GObject * obj, GObjectClass * obj_class,
       {
         const char *string_val = g_value_get_string (&value);
 
-        n_print ("String. ");
+        n_print ("%sString%s. ", DATATYPE_COLOR, RESET_COLOR);
 
         if (string_val == NULL)
-          g_print ("Default: null");
+          g_print ("%sDefault%s: %snull%s", PROP_ATTR_NAME_COLOR, RESET_COLOR,
+              PROP_ATTR_VALUE_COLOR, RESET_COLOR);
         else
-          g_print ("Default: \"%s\"", string_val);
+          g_print ("%sDefault%s: %s\"%s\"%s", PROP_ATTR_NAME_COLOR, RESET_COLOR,
+              PROP_ATTR_VALUE_COLOR, string_val, RESET_COLOR);
         break;
       }
       case G_TYPE_BOOLEAN:
       {
         gboolean bool_val = g_value_get_boolean (&value);
 
-        n_print ("Boolean. Default: %s", bool_val ? "true" : "false");
+        n_print ("%sBoolean%s. %sDefault%s: %s%s%s", DATATYPE_COLOR,
+            RESET_COLOR, PROP_ATTR_NAME_COLOR, RESET_COLOR, PROP_ATTR_VALUE_COLOR,
+            bool_val ? "true" : "false", RESET_COLOR);
         break;
       }
       case G_TYPE_ULONG:
       {
         GParamSpecULong *pulong = G_PARAM_SPEC_ULONG (param);
 
-        n_print ("Unsigned Long. Range: %lu - %lu Default: %lu ",
-            pulong->minimum, pulong->maximum, g_value_get_ulong (&value));
+        n_print
+            ("%sUnsigned Long%s. %sRange%s: %s%lu - %lu%s %sDefault%s: %s%lu%s ",
+            DATATYPE_COLOR, RESET_COLOR, PROP_ATTR_NAME_COLOR, RESET_COLOR,
+            PROP_ATTR_VALUE_COLOR, pulong->minimum, pulong->maximum, RESET_COLOR,
+            PROP_ATTR_NAME_COLOR, RESET_COLOR, PROP_ATTR_VALUE_COLOR,
+            g_value_get_ulong (&value), RESET_COLOR);
 
         GST_ERROR ("%s: property '%s' of type ulong: consider changing to "
             "uint/uint64", G_OBJECT_CLASS_NAME (obj_class),
@@ -394,8 +451,11 @@ print_object_properties_info (GObject * obj, GObjectClass * obj_class,
       {
         GParamSpecLong *plong = G_PARAM_SPEC_LONG (param);
 
-        n_print ("Long. Range: %ld - %ld Default: %ld ",
-            plong->minimum, plong->maximum, g_value_get_long (&value));
+        n_print ("%sLong%s. %sRange%s: %s%ld - %ld%s %sDefault%s: %s%ld%s ",
+            DATATYPE_COLOR, RESET_COLOR, PROP_ATTR_NAME_COLOR, RESET_COLOR,
+            PROP_ATTR_VALUE_COLOR, plong->minimum, plong->maximum, RESET_COLOR,
+            PROP_ATTR_NAME_COLOR, RESET_COLOR, PROP_ATTR_VALUE_COLOR,
+            g_value_get_long (&value), RESET_COLOR);
 
         GST_ERROR ("%s: property '%s' of type long: consider changing to "
             "int/int64", G_OBJECT_CLASS_NAME (obj_class),
@@ -406,50 +466,69 @@ print_object_properties_info (GObject * obj, GObjectClass * obj_class,
       {
         GParamSpecUInt *puint = G_PARAM_SPEC_UINT (param);
 
-        n_print ("Unsigned Integer. Range: %u - %u Default: %u ",
-            puint->minimum, puint->maximum, g_value_get_uint (&value));
+        n_print
+            ("%sUnsigned Integer%s. %sRange%s: %s%u - %u%s %sDefault%s: %s%u%s ",
+            DATATYPE_COLOR, RESET_COLOR, PROP_ATTR_NAME_COLOR, RESET_COLOR,
+            PROP_ATTR_VALUE_COLOR, puint->minimum, puint->maximum, RESET_COLOR,
+            PROP_ATTR_NAME_COLOR, RESET_COLOR, PROP_ATTR_VALUE_COLOR,
+            g_value_get_uint (&value), RESET_COLOR);
         break;
       }
       case G_TYPE_INT:
       {
         GParamSpecInt *pint = G_PARAM_SPEC_INT (param);
 
-        n_print ("Integer. Range: %d - %d Default: %d ",
-            pint->minimum, pint->maximum, g_value_get_int (&value));
+        n_print ("%sInteger%s. %sRange%s: %s%d - %d%s %sDefault%s: %s%d%s ",
+            DATATYPE_COLOR, RESET_COLOR, PROP_ATTR_NAME_COLOR, RESET_COLOR,
+            PROP_ATTR_VALUE_COLOR, pint->minimum, pint->maximum, RESET_COLOR,
+            PROP_ATTR_NAME_COLOR, RESET_COLOR, PROP_ATTR_VALUE_COLOR,
+            g_value_get_int (&value), RESET_COLOR);
         break;
       }
       case G_TYPE_UINT64:
       {
         GParamSpecUInt64 *puint64 = G_PARAM_SPEC_UINT64 (param);
 
-        n_print ("Unsigned Integer64. Range: %" G_GUINT64_FORMAT " - "
-            "%" G_GUINT64_FORMAT " Default: %" G_GUINT64_FORMAT " ",
-            puint64->minimum, puint64->maximum, g_value_get_uint64 (&value));
+        n_print ("%sUnsigned Integer64%s. %sRange%s: %s%" G_GUINT64_FORMAT " - "
+            "%" G_GUINT64_FORMAT "%s %sDefault%s: %s%" G_GUINT64_FORMAT "%s ",
+            DATATYPE_COLOR, RESET_COLOR, PROP_ATTR_NAME_COLOR, RESET_COLOR,
+            PROP_ATTR_VALUE_COLOR, puint64->minimum, puint64->maximum, RESET_COLOR,
+            PROP_ATTR_NAME_COLOR, RESET_COLOR, PROP_ATTR_VALUE_COLOR,
+            g_value_get_uint64 (&value), RESET_COLOR);
         break;
       }
       case G_TYPE_INT64:
       {
         GParamSpecInt64 *pint64 = G_PARAM_SPEC_INT64 (param);
 
-        n_print ("Integer64. Range: %" G_GINT64_FORMAT " - %" G_GINT64_FORMAT
-            " Default: %" G_GINT64_FORMAT " ",
-            pint64->minimum, pint64->maximum, g_value_get_int64 (&value));
+        n_print ("%sInteger64%s. %sRange%s: %s%" G_GINT64_FORMAT " - %"
+            G_GINT64_FORMAT "%s %sDefault%s: %s%" G_GINT64_FORMAT "%s ",
+            DATATYPE_COLOR, RESET_COLOR, PROP_ATTR_NAME_COLOR, RESET_COLOR,
+            PROP_ATTR_VALUE_COLOR, pint64->minimum, pint64->maximum, RESET_COLOR,
+            PROP_ATTR_NAME_COLOR, RESET_COLOR, PROP_ATTR_VALUE_COLOR,
+            g_value_get_int64 (&value), RESET_COLOR);
         break;
       }
       case G_TYPE_FLOAT:
       {
         GParamSpecFloat *pfloat = G_PARAM_SPEC_FLOAT (param);
 
-        n_print ("Float. Range: %15.7g - %15.7g Default: %15.7g ",
-            pfloat->minimum, pfloat->maximum, g_value_get_float (&value));
+        n_print ("%sFloat%s. %sRange%s: %s%15.7g - %15.7g%s "
+            "%sDefault%s: %s%15.7g%s ", DATATYPE_COLOR, RESET_COLOR,
+            PROP_ATTR_NAME_COLOR, RESET_COLOR, PROP_ATTR_VALUE_COLOR, pfloat->minimum,
+            pfloat->maximum, RESET_COLOR, PROP_ATTR_NAME_COLOR, RESET_COLOR,
+            PROP_ATTR_VALUE_COLOR, g_value_get_float (&value), RESET_COLOR);
         break;
       }
       case G_TYPE_DOUBLE:
       {
         GParamSpecDouble *pdouble = G_PARAM_SPEC_DOUBLE (param);
 
-        n_print ("Double. Range: %15.7g - %15.7g Default: %15.7g ",
-            pdouble->minimum, pdouble->maximum, g_value_get_double (&value));
+        n_print ("%sDouble%s. %sRange%s: %s%15.7g - %15.7g%s "
+            "%sDefault%s: %s%15.7g%s ", DATATYPE_COLOR, RESET_COLOR,
+            PROP_ATTR_NAME_COLOR, RESET_COLOR, PROP_ATTR_VALUE_COLOR, pdouble->minimum,
+            pdouble->maximum, RESET_COLOR, PROP_ATTR_NAME_COLOR, RESET_COLOR,
+            PROP_ATTR_VALUE_COLOR, g_value_get_double (&value), RESET_COLOR);
         break;
       }
       case G_TYPE_CHAR:
@@ -463,7 +542,7 @@ print_object_properties_info (GObject * obj, GObjectClass * obj_class,
           const GstCaps *caps = gst_value_get_caps (&value);
 
           if (!caps)
-            n_print ("Caps (NULL)");
+            n_print ("%sCaps%s (NULL)", DATATYPE_COLOR, RESET_COLOR);
           else {
             print_caps (caps, "                           ");
           }
@@ -482,14 +561,18 @@ print_object_properties_info (GObject * obj, GObjectClass * obj_class,
             j++;
           }
 
-          n_print ("Enum \"%s\" Default: %d, \"%s\"",
-              g_type_name (G_VALUE_TYPE (&value)), enum_value, value_nick);
+          n_print ("%sEnum \"%s\"%s %sDefault%s: %s%d, \"%s\"%s",
+              DATATYPE_COLOR, g_type_name (G_VALUE_TYPE (&value)), RESET_COLOR,
+              PROP_ATTR_NAME_COLOR, RESET_COLOR, PROP_ATTR_VALUE_COLOR, enum_value,
+              value_nick, RESET_COLOR);
 
           j = 0;
           while (values[j].value_name) {
             g_print ("\n");
-            n_print ("   (%d): %-16s - %s",
-                values[j].value, values[j].value_nick, values[j].value_name);
+            n_print ("   %s(%d)%s: %s%-16s%s - %s%s%s",
+                PROP_ATTR_NAME_COLOR, values[j].value, RESET_COLOR,
+                PROP_ATTR_VALUE_COLOR, values[j].value_nick, RESET_COLOR,
+                DESC_COLOR, values[j].value_name, RESET_COLOR);
             j++;
           }
           /* g_type_class_unref (ec); */
@@ -502,23 +585,29 @@ print_object_properties_info (GObject * obj, GObjectClass * obj_class,
 
           cur = flags_to_string (vals, g_value_get_flags (&value));
 
-          n_print ("Flags \"%s\" Default: 0x%08x, \"%s\"",
-              g_type_name (G_VALUE_TYPE (&value)),
-              g_value_get_flags (&value), cur);
+          n_print ("%sFlags \"%s\"%s %sDefault%s: %s0x%08x, \"%s\"%s",
+              DATATYPE_COLOR, g_type_name (G_VALUE_TYPE (&value)), RESET_COLOR,
+              PROP_ATTR_NAME_COLOR, RESET_COLOR, PROP_ATTR_VALUE_COLOR,
+              g_value_get_flags (&value), cur, RESET_COLOR);
 
           while (vals[0].value_name) {
             g_print ("\n");
-            n_print ("   (0x%08x): %-16s - %s",
-                vals[0].value, vals[0].value_nick, vals[0].value_name);
+            n_print ("   %s(0x%08x)%s: %s%-16s%s - %s%s%s",
+                PROP_ATTR_NAME_COLOR, vals[0].value, RESET_COLOR,
+                PROP_ATTR_VALUE_COLOR, vals[0].value_nick, RESET_COLOR,
+                DESC_COLOR, vals[0].value_name, RESET_COLOR);
             ++vals;
           }
 
           g_free (cur);
         } else if (G_IS_PARAM_SPEC_OBJECT (param)) {
-          n_print ("Object of type \"%s\"", g_type_name (param->value_type));
+          n_print ("%sObject of type%s %s\"%s\"%s", PROP_VALUE_COLOR,
+              RESET_COLOR, DATATYPE_COLOR,
+              g_type_name (param->value_type), RESET_COLOR);
         } else if (G_IS_PARAM_SPEC_BOXED (param)) {
-          n_print ("Boxed pointer of type \"%s\"",
-              g_type_name (param->value_type));
+          n_print ("%sBoxed pointer of type%s %s\"%s\"%s", PROP_VALUE_COLOR,
+              RESET_COLOR, DATATYPE_COLOR,
+              g_type_name (param->value_type), RESET_COLOR);
           if (param->value_type == GST_TYPE_STRUCTURE) {
             const GstStructure *s = gst_value_get_structure (&value);
             if (s)
@@ -527,45 +616,52 @@ print_object_properties_info (GObject * obj, GObjectClass * obj_class,
           }
         } else if (G_IS_PARAM_SPEC_POINTER (param)) {
           if (param->value_type != G_TYPE_POINTER) {
-            n_print ("Pointer of type \"%s\".",
-                g_type_name (param->value_type));
+            n_print ("%sPointer of type%s %s\"%s\"%s.", PROP_VALUE_COLOR,
+                RESET_COLOR, DATATYPE_COLOR, g_type_name (param->value_type),
+                RESET_COLOR);
           } else {
-            n_print ("Pointer.");
+            n_print ("%sPointer.%s", PROP_VALUE_COLOR, RESET_COLOR);
           }
         } else if (param->value_type == G_TYPE_VALUE_ARRAY) {
           GParamSpecValueArray *pvarray = G_PARAM_SPEC_VALUE_ARRAY (param);
 
           if (pvarray->element_spec) {
-            n_print ("Array of GValues of type \"%s\"",
-                g_type_name (pvarray->element_spec->value_type));
+            n_print ("%sArray of GValues of type%s %s\"%s\"%s",
+                PROP_VALUE_COLOR, RESET_COLOR, DATATYPE_COLOR,
+                g_type_name (pvarray->element_spec->value_type), RESET_COLOR);
           } else {
-            n_print ("Array of GValues");
+            n_print ("%sArray of GValues%s", PROP_VALUE_COLOR, RESET_COLOR);
           }
         } else if (GST_IS_PARAM_SPEC_FRACTION (param)) {
           GstParamSpecFraction *pfraction = GST_PARAM_SPEC_FRACTION (param);
 
-          n_print ("Fraction. Range: %d/%d - %d/%d Default: %d/%d ",
-              pfraction->min_num, pfraction->min_den,
-              pfraction->max_num, pfraction->max_den,
-              gst_value_get_fraction_numerator (&value),
-              gst_value_get_fraction_denominator (&value));
+          n_print ("%sFraction%s. %sRange%s: %s%d/%d - %d/%d%s "
+              "%sDefault%s: %s%d/%d%s ", DATATYPE_COLOR, RESET_COLOR,
+              PROP_ATTR_NAME_COLOR, RESET_COLOR, PROP_ATTR_VALUE_COLOR,
+              pfraction->min_num, pfraction->min_den, pfraction->max_num,
+              pfraction->max_den, RESET_COLOR, PROP_ATTR_NAME_COLOR, RESET_COLOR,
+              PROP_ATTR_VALUE_COLOR, gst_value_get_fraction_numerator (&value),
+              gst_value_get_fraction_denominator (&value), RESET_COLOR);
         } else if (param->value_type == GST_TYPE_ARRAY) {
           GstParamSpecArray *parray = GST_PARAM_SPEC_ARRAY_LIST (param);
 
           if (parray->element_spec) {
-            n_print ("GstValueArray of GValues of type \"%s\"",
-                g_type_name (parray->element_spec->value_type));
+            n_print ("%sGstValueArray of GValues of type%s %s\"%s\"%s",
+                PROP_VALUE_COLOR, RESET_COLOR, DATATYPE_COLOR,
+                g_type_name (parray->element_spec->value_type), RESET_COLOR);
           } else {
-            n_print ("GstValueArray of GValues");
+            n_print ("%sGstValueArray of GValues%s", PROP_VALUE_COLOR,
+                RESET_COLOR);
           }
         } else {
-          n_print ("Unknown type %ld \"%s\"",
-              (glong) param->value_type, g_type_name (param->value_type));
+          n_print ("%sUnknown type %ld%s %s\"%s\"%s", PROP_VALUE_COLOR,
+              (glong) param->value_type, RESET_COLOR, DATATYPE_COLOR,
+              g_type_name (param->value_type), RESET_COLOR);
         }
         break;
     }
     if (!readable)
-      g_print (" Write only\n");
+      g_print (" %sWrite only%s\n", PROP_VALUE_COLOR, RESET_COLOR);
     else
       g_print ("\n");
 
@@ -574,7 +670,7 @@ print_object_properties_info (GObject * obj, GObjectClass * obj_class,
     g_value_reset (&value);
   }
   if (num_properties == 0)
-    n_print ("none\n");
+    n_print ("%snone%s\n", PROP_VALUE_COLOR, RESET_COLOR);
 
   pop_indent ();
 
@@ -596,12 +692,12 @@ print_pad_templates_info (GstElement * element, GstElementFactory * factory)
   GstStaticPadTemplate *padtemplate;
   GstPadTemplate *tmpl;
 
-  n_print ("Pad Templates:\n");
+  n_print ("%sPad Templates%s:\n", HEADING_COLOR, RESET_COLOR);
 
   push_indent ();
 
   if (gst_element_factory_get_num_pad_templates (factory) == 0) {
-    n_print ("none\n");
+    n_print ("%snone%s\n", PROP_VALUE_COLOR, RESET_COLOR);
     goto done;
   }
 
@@ -611,27 +707,27 @@ print_pad_templates_info (GstElement * element, GstElementFactory * factory)
     pads = g_list_next (pads);
 
     if (padtemplate->direction == GST_PAD_SRC)
-      n_print ("SRC template: '%s'\n", padtemplate->name_template);
+      n_print ("%sSRC template%s: %s'%s'%s\n", PROP_NAME_COLOR, RESET_COLOR, PROP_VALUE_COLOR, padtemplate->name_template, RESET_COLOR);
     else if (padtemplate->direction == GST_PAD_SINK)
-      n_print ("SINK template: '%s'\n", padtemplate->name_template);
+      n_print ("%sSINK template%s: %s'%s'%s\n", PROP_NAME_COLOR, RESET_COLOR, PROP_VALUE_COLOR, padtemplate->name_template, RESET_COLOR);
     else
-      n_print ("UNKNOWN template: '%s'\n", padtemplate->name_template);
+      n_print ("%sUNKNOWN template%s: %s'%s'%s\n", PROP_NAME_COLOR, RESET_COLOR, PROP_VALUE_COLOR, padtemplate->name_template, RESET_COLOR);
 
     push_indent ();
 
     if (padtemplate->presence == GST_PAD_ALWAYS)
-      n_print ("Availability: Always\n");
+      n_print ("%sAvailability%s: %sAlways%s\n", PROP_NAME_COLOR, RESET_COLOR, PROP_VALUE_COLOR, RESET_COLOR);
     else if (padtemplate->presence == GST_PAD_SOMETIMES)
-      n_print ("Availability: Sometimes\n");
+      n_print ("%sAvailability%s: %sSometimes%s\n", PROP_NAME_COLOR, RESET_COLOR, PROP_VALUE_COLOR, RESET_COLOR);
     else if (padtemplate->presence == GST_PAD_REQUEST) {
-      n_print ("Availability: On request\n");
+      n_print ("%sAvailability%s: %sOn request%s\n", PROP_NAME_COLOR, RESET_COLOR, PROP_VALUE_COLOR, RESET_COLOR);
     } else
-      n_print ("Availability: UNKNOWN\n");
+      n_print ("%sAvailability%s: %sUNKNOWN%s\n", PROP_NAME_COLOR, RESET_COLOR, PROP_VALUE_COLOR, RESET_COLOR);
 
     if (padtemplate->static_caps.string) {
       GstCaps *caps = gst_static_caps_get (&padtemplate->static_caps);
 
-      n_print ("Capabilities:\n");
+      n_print ("%sCapabilities%s:\n", PROP_NAME_COLOR, RESET_COLOR);
 
       push_indent ();
       print_caps (caps, "");    // FIXME
@@ -649,7 +745,7 @@ print_pad_templates_info (GstElement * element, GstElementFactory * factory)
         gpointer pad_klass;
 
         pad_klass = g_type_class_ref (pad_type);
-        n_print ("Type: %s\n", g_type_name (pad_type));
+        n_print ("%sType%s: %s%s%s\n", PROP_NAME_COLOR, RESET_COLOR, DATATYPE_COLOR, g_type_name (pad_type), RESET_COLOR);
         print_object_properties_info (NULL, pad_klass, "Pad Properties");
         g_type_class_unref (pad_klass);
       }
@@ -677,17 +773,17 @@ print_clocking_info (GstElement * element)
 
   if (!requires_clock && !provides_clock) {
     n_print ("\n");
-    n_print ("Element has no clocking capabilities.\n");
+    n_print ("%sElement has no clocking capabilities.%s\n", DESC_COLOR, RESET_COLOR);
     return;
   }
 
   n_print ("\n");
-  n_print ("Clocking Interaction:\n");
+  n_print ("%sClocking Interaction%s:\n", PROP_NAME_COLOR, RESET_COLOR);
 
   push_indent ();
 
   if (requires_clock) {
-    n_print ("element requires a clock\n");
+    n_print ("%selement requires a clock%s\n", PROP_VALUE_COLOR, RESET_COLOR);
   }
 
   if (provides_clock) {
@@ -695,10 +791,10 @@ print_clocking_info (GstElement * element)
 
     clock = gst_element_get_clock (element);
     if (clock) {
-      n_print ("element provides a clock: %s\n", GST_OBJECT_NAME (clock));
+      n_print ("%selement provides a clock%s: %s%s%s\n", PROP_VALUE_COLOR, RESET_COLOR, DATATYPE_COLOR, GST_OBJECT_NAME (clock), RESET_COLOR);
       gst_object_unref (clock);
     } else
-      n_print ("element is supposed to provide a clock but returned NULL\n");
+      n_print ("%selement is supposed to provide a clock but returned NULL%s\n", PROP_VALUE_COLOR, RESET_COLOR);
   }
 
   pop_indent ();
@@ -722,25 +818,25 @@ print_uri_handler_info (GstElement * element)
     uri_protocols = gst_uri_handler_get_protocols (GST_URI_HANDLER (element));
 
     n_print ("\n");
-    n_print ("URI handling capabilities:\n");
+    n_print ("%sURI handling capabilities:%s\n", PROP_NAME_COLOR, RESET_COLOR);
 
     push_indent ();
 
-    n_print ("Element can act as %s.\n", uri_type);
+    n_print ("%sElement can act as %s.%s\n", PROP_VALUE_COLOR, uri_type, RESET_COLOR);
 
     if (uri_protocols && *uri_protocols) {
-      n_print ("Supported URI protocols:\n");
+      n_print ("%sSupported URI protocols%s:\n", PROP_ATTR_NAME_COLOR, RESET_COLOR);
       push_indent ();
       for (; *uri_protocols != NULL; uri_protocols++)
-        n_print ("%s\n", *uri_protocols);
+        n_print ("%s%s%s\n", PROP_ATTR_VALUE_COLOR, *uri_protocols, RESET_COLOR);
       pop_indent ();
     } else {
-      n_print ("No supported URI protocols\n");
+      n_print ("%sNo supported URI protocols%s\n", PROP_VALUE_COLOR, RESET_COLOR);
     }
 
     pop_indent ();
   } else {
-    n_print ("Element has no URI handling capabilities.\n");
+    n_print ("%sElement has no URI handling capabilities.%s\n", DESC_COLOR, RESET_COLOR);
   }
 }
 
@@ -751,12 +847,12 @@ print_pad_info (GstElement * element)
   GstPad *pad;
 
   n_print ("\n");
-  n_print ("Pads:\n");
+  n_print ("%sPads:%s\n", HEADING_COLOR, RESET_COLOR);
 
   push_indent ();
 
   if (!element->numpads) {
-    n_print ("none\n");
+    n_print ("%snone%s\n", PROP_VALUE_COLOR, RESET_COLOR);
     goto done;
   }
 
@@ -770,23 +866,23 @@ print_pad_info (GstElement * element)
 
     name = gst_pad_get_name (pad);
     if (gst_pad_get_direction (pad) == GST_PAD_SRC)
-      n_print ("SRC: '%s'\n", name);
+      n_print ("%sSRC%s: %s'%s'%s\n", PROP_NAME_COLOR, RESET_COLOR, PROP_VALUE_COLOR, name, RESET_COLOR);
     else if (gst_pad_get_direction (pad) == GST_PAD_SINK)
-      n_print ("SINK: '%s'\n", name);
+      n_print ("%sSINK%s: %s'%s'%s\n", PROP_NAME_COLOR, RESET_COLOR, PROP_VALUE_COLOR, name, RESET_COLOR);
     else
-      n_print ("UNKNOWN: '%s'\n", name);
+      n_print ("%sUNKNOWN%s: %s'%s'%s\n", PROP_NAME_COLOR, RESET_COLOR, PROP_VALUE_COLOR, name, RESET_COLOR);
 
     g_free (name);
 
     if (pad->padtemplate) {
       push_indent ();
-      n_print ("Pad Template: '%s'\n", pad->padtemplate->name_template);
+      n_print ("%sPad Template%s: %s'%s'%s\n", PROP_NAME_COLOR, RESET_COLOR, PROP_VALUE_COLOR, pad->padtemplate->name_template, RESET_COLOR);
       pop_indent ();
     }
 
     caps = gst_pad_get_current_caps (pad);
     if (caps) {
-      n_print ("Capabilities:\n");
+      n_print ("%sCapabilities:%s\n", PROP_NAME_COLOR, RESET_COLOR);
       push_indent ();
       print_caps (caps, "");    // FIXME
       pop_indent ();
@@ -879,9 +975,9 @@ print_signal_info (GstElement * element)
     if (found_signals) {
       n_print ("\n");
       if (k == 0)
-        n_print ("Element Signals:\n");
+        n_print ("%sElement Signals%s:\n", HEADING_COLOR, RESET_COLOR);
       else
-        n_print ("Element Actions:\n");
+        n_print ("%sElement Actions%s:\n", HEADING_COLOR, RESET_COLOR);
     } else {
       continue;
     }
@@ -899,15 +995,16 @@ print_signal_info (GstElement * element)
         pmark = "* ";
         indent_len += 2;
       } else {
-        pmark = "";
+        pmark = " ";
       }
 
       indent = g_new0 (gchar, indent_len + 1);
       memset (indent, ' ', indent_len);
 
-      n_print ("  \"%s\" :  %s %suser_function (%s* object",
-          query->signal_name, g_type_name (query->return_type), pmark,
-          g_type_name (type));
+      n_print ("  %s\"%s\"%s :  %s%s%s%suser_function%s (%s%s%s* object%s",
+          PROP_NAME_COLOR, query->signal_name, RESET_COLOR,
+          DATATYPE_COLOR, g_type_name (query->return_type), PROP_VALUE_COLOR, pmark, RESET_COLOR,
+          DATATYPE_COLOR, g_type_name (type), PROP_VALUE_COLOR, RESET_COLOR);
 
       for (j = 0; j < query->n_params; j++) {
         const gchar *type_name, *asterisk;
@@ -916,12 +1013,12 @@ print_signal_info (GstElement * element)
         asterisk = gtype_needs_ptr_marker (query->param_types[j]) ? "*" : "";
 
         g_print (",\n");
-        n_print ("%s%s%s arg%d", indent, type_name, asterisk, j);
+        n_print ("%s%s%s%s%s arg%d%s", indent, DATATYPE_COLOR, type_name, PROP_VALUE_COLOR, asterisk, j, RESET_COLOR);
       }
 
       if (k == 0) {
         g_print (",\n");
-        n_print ("%sgpointer user_data);\n", indent);
+        n_print ("%s%sgpointer %suser_data%s);\n", indent, DATATYPE_COLOR, PROP_VALUE_COLOR, RESET_COLOR);
       } else
         g_print (");\n");
 
@@ -946,11 +1043,11 @@ print_children_info (GstElement * element)
   children = (GList *) GST_BIN (element)->children;
   if (children) {
     n_print ("\n");
-    n_print ("Children:\n");
+    n_print ("%sChildren%s:\n", HEADING_COLOR, RESET_COLOR);
   }
 
   while (children) {
-    n_print ("  %s\n", GST_ELEMENT_NAME (GST_ELEMENT (children->data)));
+    n_print ("  %s%s%s\n", DATATYPE_COLOR, GST_ELEMENT_NAME (GST_ELEMENT (children->data)), RESET_COLOR);
     children = g_list_next (children);
   }
 }
@@ -966,7 +1063,7 @@ print_preset_list (GstElement * element)
   presets = gst_preset_get_preset_names (GST_PRESET (element));
   if (presets && *presets) {
     n_print ("\n");
-    n_print ("Presets:\n");
+    n_print ("%sPresets%s:\n", HEADING_COLOR, RESET_COLOR);
     for (preset = presets; *preset; preset++) {
       n_print ("  \"%s\"\n", *preset);
     }
@@ -980,7 +1077,7 @@ print_blacklist (void)
   GList *plugins, *cur;
   gint count = 0;
 
-  g_print ("%s\n", _("Blacklisted files:"));
+  g_print ("%s%s%s\n", HEADING_COLOR, _("Blacklisted files:"), RESET_COLOR);
 
   plugins = gst_registry_get_plugin_list (gst_registry_get ());
   for (cur = plugins; cur != NULL; cur = g_list_next (cur)) {
@@ -992,10 +1089,10 @@ print_blacklist (void)
   }
 
   g_print ("\n");
-  g_print (_("Total count: "));
+  g_print (_("%sTotal count%s: %s"), PROP_NAME_COLOR, RESET_COLOR, PROP_VALUE_COLOR);
   g_print (ngettext ("%d blacklisted file", "%d blacklisted files", count),
       count);
-  g_print ("\n");
+  g_print ("%s\n", RESET_COLOR);
   gst_plugin_list_free (plugins);
 }
 
@@ -1005,7 +1102,7 @@ print_typefind_extensions (const gchar * const *extensions)
   guint i = 0;
 
   while (extensions[i]) {
-    g_print ("%s%s", i > 0 ? ", " : "", extensions[i]);
+    g_print ("%s%s%s%s", i > 0 ? ", " : "", ELEMENT_DETAIL_COLOR, extensions[i], RESET_COLOR);
     i++;
   }
 }
@@ -1076,10 +1173,10 @@ print_element_list (gboolean print_all, gchar * ftypes)
         if (print_all)
           print_element_info (feature, TRUE);
         else
-          g_print ("%s:  %s: %s\n", gst_plugin_get_name (plugin),
-              GST_OBJECT_NAME (factory),
-              gst_element_factory_get_metadata (factory,
-                  GST_ELEMENT_METADATA_LONGNAME));
+          g_print ("%s%s%s:  %s%s%s: %s%s%s\n", PLUGIN_NAME_COLOR, gst_plugin_get_name (plugin),
+              RESET_COLOR, ELEMENT_NAME_COLOR, GST_OBJECT_NAME (factory), RESET_COLOR,
+              ELEMENT_DETAIL_COLOR, gst_element_factory_get_metadata (factory,
+                  GST_ELEMENT_METADATA_LONGNAME), RESET_COLOR);
       } else if (GST_IS_TYPE_FIND_FACTORY (feature)) {
         GstTypeFindFactory *factory;
         const gchar *const *extensions;
@@ -1088,8 +1185,8 @@ print_element_list (gboolean print_all, gchar * ftypes)
           goto next;
         factory = GST_TYPE_FIND_FACTORY (feature);
         if (!print_all)
-          g_print ("%s: %s: ", gst_plugin_get_name (plugin),
-              gst_plugin_feature_get_name (feature));
+          g_print ("%s%s%s: %s%s%s: ", PLUGIN_NAME_COLOR, gst_plugin_get_name (plugin),
+              RESET_COLOR, ELEMENT_NAME_COLOR, gst_plugin_feature_get_name (feature), RESET_COLOR);
 
         extensions = gst_type_find_factory_get_extensions (factory);
         if (extensions != NULL) {
@@ -1099,14 +1196,14 @@ print_element_list (gboolean print_all, gchar * ftypes)
           }
         } else {
           if (!print_all)
-            g_print ("no extensions\n");
+            g_print ("%sno extensions%s\n", ELEMENT_DETAIL_COLOR, RESET_COLOR);
         }
       } else {
         if (types)
           goto next;
         if (!print_all)
-          n_print ("%s:  %s (%s)\n", gst_plugin_get_name (plugin),
-              GST_OBJECT_NAME (feature), g_type_name (G_OBJECT_TYPE (feature)));
+          n_print ("%s%s%s:  %s%s%s (%s%s%s)\n", PLUGIN_NAME_COLOR, gst_plugin_get_name (plugin),
+              RESET_COLOR, ELEMENT_NAME_COLOR, GST_OBJECT_NAME (feature), RESET_COLOR, ELEMENT_DETAIL_COLOR, g_type_name (G_OBJECT_TYPE (feature)), RESET_COLOR);
       }
 
     next:
@@ -1120,7 +1217,7 @@ print_element_list (gboolean print_all, gchar * ftypes)
   g_strfreev (types);
 
   g_print ("\n");
-  g_print (_("Total count: "));
+  g_print (_("%sTotal count%s: %s"), PROP_NAME_COLOR, RESET_COLOR, PROP_VALUE_COLOR);
   g_print (ngettext ("%d plugin", "%d plugins", plugincount), plugincount);
   if (blacklistcount) {
     g_print (" (");
@@ -1128,9 +1225,9 @@ print_element_list (gboolean print_all, gchar * ftypes)
             blacklistcount), blacklistcount);
     g_print (" not shown)");
   }
-  g_print (", ");
+  g_print ("%s, %s", RESET_COLOR, PROP_VALUE_COLOR);
   g_print (ngettext ("%d feature", "%d features", featurecount), featurecount);
-  g_print ("\n");
+  g_print ("%s\n", RESET_COLOR);
 }
 
 static void
@@ -1171,8 +1268,8 @@ print_all_uri_handlers (void)
 
         if (GST_IS_URI_HANDLER (element)) {
           const gchar *const *uri_protocols;
+          const gchar *const *protocol;
           const gchar *dir;
-          gchar *joined;
 
           switch (gst_uri_handler_get_uri_type (GST_URI_HANDLER (element))) {
             case GST_URI_SRC:
@@ -1186,16 +1283,19 @@ print_all_uri_handlers (void)
               break;
           }
 
+          g_print ("%s%s%s (%s%s%s, %srank %u%s): ",
+              FEATURE_NAME_COLOR, gst_plugin_feature_get_name (GST_PLUGIN_FEATURE (factory)), RESET_COLOR,
+              FEATURE_DIR_COLOR, dir, RESET_COLOR, FEATURE_RANK_COLOR,
+              gst_plugin_feature_get_rank (GST_PLUGIN_FEATURE (factory)), RESET_COLOR);
+
           uri_protocols =
               gst_uri_handler_get_protocols (GST_URI_HANDLER (element));
-          joined = g_strjoinv (", ", (gchar **) uri_protocols);
-
-          g_print ("%s (%s, rank %u): %s\n",
-              gst_plugin_feature_get_name (GST_PLUGIN_FEATURE (factory)), dir,
-              gst_plugin_feature_get_rank (GST_PLUGIN_FEATURE (factory)),
-              joined);
-
-          g_free (joined);
+          for (protocol = uri_protocols; *protocol != NULL; protocol++) {
+            if (protocol != uri_protocols)
+                g_print (", ");
+            g_print ("%s%s%s", FEATURE_PROTO_COLOR, *protocol, RESET_COLOR);
+          }
+          g_print ("\n");
         }
 
         gst_object_unref (element);
@@ -1215,16 +1315,16 @@ print_plugin_info (GstPlugin * plugin)
   const gchar *release_date = gst_plugin_get_release_date_string (plugin);
   const gchar *filename = gst_plugin_get_filename (plugin);
 
-  n_print ("Plugin Details:\n");
+  n_print ("%sPlugin Details%s:\n", HEADING_COLOR, RESET_COLOR);
 
   push_indent ();
 
-  n_print ("%-25s%s\n", "Name", gst_plugin_get_name (plugin));
-  n_print ("%-25s%s\n", "Description", gst_plugin_get_description (plugin));
-  n_print ("%-25s%s\n", "Filename", (filename != NULL) ? filename : "(null)");
-  n_print ("%-25s%s\n", "Version", gst_plugin_get_version (plugin));
-  n_print ("%-25s%s\n", "License", gst_plugin_get_license (plugin));
-  n_print ("%-25s%s\n", "Source module", gst_plugin_get_source (plugin));
+  n_print ("%s%-25s%s%s%s%s\n", PROP_NAME_COLOR, "Name", RESET_COLOR, PROP_VALUE_COLOR, gst_plugin_get_name (plugin), RESET_COLOR);
+  n_print ("%s%-25s%s%s%s%s\n", PROP_NAME_COLOR, "Description", RESET_COLOR, PROP_VALUE_COLOR, gst_plugin_get_description (plugin), RESET_COLOR);
+  n_print ("%s%-25s%s%s%s%s\n", PROP_NAME_COLOR, "Filename", RESET_COLOR, PROP_VALUE_COLOR, (filename != NULL) ? filename : "(null)", RESET_COLOR);
+  n_print ("%s%-25s%s%s%s%s\n", PROP_NAME_COLOR, "Version", RESET_COLOR, PROP_VALUE_COLOR, gst_plugin_get_version (plugin), RESET_COLOR);
+  n_print ("%s%-25s%s%s%s%s\n", PROP_NAME_COLOR, "License", RESET_COLOR, PROP_VALUE_COLOR, gst_plugin_get_license (plugin), RESET_COLOR);
+  n_print ("%s%-25s%s%s%s%s\n", PROP_NAME_COLOR, "Source module", RESET_COLOR, PROP_VALUE_COLOR, gst_plugin_get_source (plugin), RESET_COLOR);
 
   if (release_date != NULL) {
     const gchar *tz = "(UTC)";
@@ -1242,11 +1342,11 @@ print_plugin_info (GstPlugin * plugin)
     } else {
       tz = "";
     }
-    n_print ("%-25s%s%s\n", "Source release date", str, tz);
+    n_print ("%s%-25s%s%s%s%s%s\n", PROP_NAME_COLOR, "Source release date", RESET_COLOR, PROP_VALUE_COLOR, str, tz, RESET_COLOR);
     g_free (str);
   }
-  n_print ("%-25s%s\n", "Binary package", gst_plugin_get_package (plugin));
-  n_print ("%-25s%s\n", "Origin URL", gst_plugin_get_origin (plugin));
+  n_print ("%s%-25s%s%s%s%s\n", PROP_NAME_COLOR, "Binary package", RESET_COLOR, PROP_VALUE_COLOR, gst_plugin_get_package (plugin), RESET_COLOR);
+  n_print ("%s%-25s%s%s%s%s\n", PROP_NAME_COLOR, "Origin URL", RESET_COLOR, PROP_VALUE_COLOR, gst_plugin_get_origin (plugin), RESET_COLOR);
 
   pop_indent ();
 
@@ -1798,6 +1898,9 @@ main (int argc, char *argv[])
           N_
           ("Print supported URI schemes, with the elements that implement them"),
         NULL},
+    {"no-colors", '\0', G_OPTION_FLAG_REVERSE, G_OPTION_ARG_NONE,
+          &colored_output,
+        N_("Disable colors in output"), NULL},
     GST_TOOLS_GOPTION_VERSION,
     {NULL}
   };
